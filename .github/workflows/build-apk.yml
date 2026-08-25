@@ -13,45 +13,33 @@ jobs:
 
       - name: Check project ZIP
         run: |
-          if [ ! -f "project.zip" ]; then
-            echo "ERROR: project.zip not found!"
-            exit 1
-          fi
-
-          echo "Found project.zip"
-          ls -lh project.zip
+          test -f project.zip
+          echo "project.zip found successfully"
 
       - name: Extract project ZIP
         run: |
-          rm -rf project
-          mkdir project
+          rm -rf extracted
+          mkdir extracted
+          unzip -q project.zip -d extracted
 
-          unzip -q "project.zip" -d project
-
-          echo "Project extracted successfully"
-          echo "Project contents:"
-          find project -maxdepth 3 -type f | head -100
+          echo "Extracted files:"
+          find extracted -maxdepth 3 -type f | head -100
 
       - name: Find Gradle project
         run: |
-          GRADLEW=$(find project -type f -name "gradlew" -print -quit)
+          PROJECT_DIR=$(find extracted -type f -name "settings.gradle" -print -quit | xargs -r dirname)
 
-          if [ -z "$GRADLEW" ]; then
-            echo "ERROR: gradlew was not found inside project.zip"
-            echo "Searching for Gradle files..."
-            find project -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" -o -name "build.gradle" -o -name "build.gradle.kts" \) -print
+          if [ -z "$PROJECT_DIR" ]; then
+            PROJECT_DIR=$(find extracted -type f -name "build.gradle" -print -quit | xargs -r dirname)
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: No Gradle project found inside project.zip"
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$GRADLEW")
-
-          echo "Found Gradle wrapper:"
-          echo "$GRADLEW"
-
-          echo "Gradle project directory:"
-          echo "$PROJECT_DIR"
-
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Gradle project found at: $PROJECT_DIR"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -73,40 +61,36 @@ jobs:
           gradle-version: "8.7"
 
       - name: Check Gradle project
-        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          echo "Gradle project:"
-          pwd
-          echo "Files:"
-          ls -la
+          echo "Project directory:"
+          echo "$PROJECT_DIR"
+
+          echo "Project files:"
+          find "$PROJECT_DIR" -maxdepth 3 -type f | sort
+
+          test -f "$PROJECT_DIR/settings.gradle" || test -f "$PROJECT_DIR/settings.gradle.kts"
+          test -f "$PROJECT_DIR/build.gradle" || test -f "$PROJECT_DIR/build.gradle.kts"
 
       - name: Build APK
-        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          gradle -p "$PROJECT_DIR" assembleDebug --no-daemon
 
       - name: Find APK
         run: |
-          echo "Searching for APK..."
-
-          find project -type f -name "*.apk" -print
-
-          APK=$(find project -type f -path "*/build/outputs/apk/debug/*.apk" -print -quit)
+          APK=$(find "$PROJECT_DIR" -type f -name "*.apk" -print -quit)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated!"
+            echo "ERROR: APK was not generated"
             exit 1
           fi
 
           echo "APK found:"
           echo "$APK"
 
-          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
+          cp "$APK" Mowajeh.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: mowajeh-smart-apk-new
-          path: ${{ env.APK_PATH }}
-          if-no-files-found: error
+          name: mowajeh-apk
+          path: Mowajeh.apk
